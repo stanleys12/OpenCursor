@@ -38,6 +38,17 @@ function key(target: HTMLElement, key: string, extra: KeyboardEventInit = {}) {
   act(() => { target.focus(); target.dispatchEvent(event); });
   return event;
 }
+function renderPicker(initialModel: ModelDef) {
+  function Fixture() {
+    const [model, setModel] = React.useState(initialModel);
+    return <Composer {...props} modelList={[model]} selectedModel={model.id} onSaveModelOptions={(id, options) => {
+      props.onSaveModelOptions(id, options);
+      setModel(previous => ({ ...previous, options }));
+    }} />;
+  }
+  act(() => root.render(<Fixture />));
+  return container.querySelector('[aria-label="Choose model"]') as HTMLElement;
+}
 function lastDraft(): ComposerDraft { return draftChanged.mock.calls[draftChanged.mock.calls.length - 1][0]; }
 
 it("previews attached images without submitting or removing them, and keeps removal separate", () => {
@@ -238,15 +249,7 @@ it("saves Speed choices with their cost hint and shows Fast in the compact model
     { key: "reasoning_effort", label: "Reasoning effort", type: "select", value: "high", values: ["low", "high"] },
     { key: "speed", label: "Speed", type: "select", value: "standard", values: ["standard", "fast"], description },
   ] };
-  function Fixture() {
-    const [model, setModel] = React.useState(initialModel);
-    return <Composer {...props} modelList={[model]} selectedModel={model.id} onSaveModelOptions={(id, options) => {
-      props.onSaveModelOptions(id, options);
-      setModel(previous => ({ ...previous, options }));
-    }} />;
-  }
-  act(() => root.render(<Fixture />));
-  const trigger = container.querySelector('[aria-label="Choose model"]') as HTMLElement;
+  const trigger = renderPicker(initialModel);
   expect(trigger.textContent).toContain("High");
   expect(trigger.textContent).not.toContain("Standard");
   expect(trigger.textContent).not.toContain("Fast");
@@ -266,6 +269,39 @@ it("saves Speed choices with their cost hint and shows Fast in the compact model
   expect(props.onSaveModelOptions).toHaveBeenLastCalledWith("example", initialModel.options);
   expect(trigger.textContent).not.toContain("Fast");
   expect(trigger.textContent).not.toContain("Standard");
+  expect(submit).not.toHaveBeenCalled();
+});
+
+it("saves a typed context budget within the model ceiling and rejects invalid sizes", () => {
+  const initialModel: ModelDef = { id: "example", name: "Example model", kind: "openai", options: [
+    { key: "max_context", label: "Context budget", type: "select", value: "128k", values: ["128k", "256k"] },
+  ] };
+  const trigger = renderPicker(initialModel);
+  key(trigger, "Enter");
+  act(() => (document.querySelector('[title="Edit options"]') as HTMLButtonElement).click());
+  const input = document.querySelector('[aria-label="Custom context budget"]') as HTMLInputElement;
+  const type = (value: string) => act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  for (const value of ["abc", "0", "1", "1.2.3", "999m"]) {
+    type(value);
+    key(input, "Enter");
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+  }
+  expect(props.onSaveModelOptions).not.toHaveBeenCalled();
+  type("150K");
+  key(input, "Enter");
+  expect(props.onSaveModelOptions).toHaveBeenLastCalledWith("example", [{ ...initialModel.options[0], value: "150k", values: ["128k", "256k", "150k"] }]);
+  expect(document.querySelector('[aria-label="Context budget: 150k"]')?.getAttribute("aria-pressed")).toBe("true");
+  expect(input.value).toBe("");
+  type("250000");
+  key(input, "Enter");
+  expect(props.onSaveModelOptions).toHaveBeenLastCalledWith("example", [{ ...initialModel.options[0], value: "250000", values: ["128k", "256k", "150k", "250000"] }]);
+  type("200000");
+  act(() => (document.querySelector('[aria-label="Context budget: 128k"]') as HTMLElement).click());
+  expect(props.onSaveModelOptions).toHaveBeenLastCalledWith("example", [expect.objectContaining({ value: "128k" })]);
+  expect(document.querySelector('.model-picker')).not.toBeNull();
   expect(submit).not.toHaveBeenCalled();
 });
 

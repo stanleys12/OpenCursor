@@ -231,7 +231,7 @@ const MODES: { id: Mode; label: string; icon: IconName }[] = [
 /** Parse a context-size label ("200k", "1m", "128k") to a token count. */
 function parseContextSize(v: string | undefined): number {
   if (!v) return 0;
-  const m = /^([\d.]+)\s*([km])?$/i.exec(v.trim());
+  const m = /^(\d+(?:\.\d+)?)\s*([km])?$/i.exec(v.trim());
   if (!m) return 0;
   const n = parseFloat(m[1]);
   const unit = (m[2] || "").toLowerCase();
@@ -590,10 +590,43 @@ const VALUE_LABELS: Record<string, string> = {
   fast: "Fast",
 };
 
+/** Free-form context budget, capped at the largest preset the model offers. */
+function ContextSizeInput({ values, onCommit }: { values: string[]; onCommit: (value: string) => void }) {
+  const [text, setText] = React.useState("");
+  const [invalid, setInvalid] = React.useState(false);
+  const ceiling = Math.max(...values.map(parseContextSize));
+  const commit = () => {
+    const value = text.replace(/\s+/g, "").toLowerCase();
+    if (!value) return setInvalid(false);
+    const tokens = parseContextSize(value);
+    if (!(tokens >= 1_000 && tokens <= ceiling)) return setInvalid(true);
+    setText("");
+    setInvalid(false);
+    onCommit(value);
+  };
+  return (
+    <div className="mo-custom">
+      <input
+        value={text}
+        placeholder="Custom, e.g. 150k or 200000"
+        aria-label="Custom context budget"
+        aria-invalid={invalid}
+        onChange={(e) => { setText(e.target.value); setInvalid(false); }}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); commit(); } }}
+      />
+      {invalid && <p className="mo-description">Between 1k and {values.find((v) => parseContextSize(v) === ceiling)} tokens.</p>}
+    </div>
+  );
+}
+
 /** Editable option groups for one model (left column of the picker). */
 function ModelOptions({ model, onChange }: { model: ModelDef; onChange: (opts: ModelOption[]) => void }) {
   const descriptionId = React.useId();
   const setOpt = (i: number, value: string) => onChange(model.options.map((o, idx) => (idx === i ? { ...o, value } : o)));
+  const setCustomContext = (i: number, value: string) => onChange(model.options.map((o, idx) => {
+    if (idx !== i) return o;
+    return { ...o, value, values: o.values?.includes(value) ? o.values : [...(o.values ?? []), value] };
+  }));
   if (model.options.length === 0) {
     return <div className="mo-empty">No options for this model.</div>;
   }
@@ -628,6 +661,7 @@ function ModelOptions({ model, onChange }: { model: ModelDef; onChange: (opts: M
                 {v === o.value && <Icon name="check" className="mo-check" />}
               </div>
             ))}
+            {o.key === "max_context" && o.values && <ContextSizeInput values={o.values} onCommit={(v) => setCustomContext(i, v)} />}
           </div>
         )
       )}

@@ -13,6 +13,12 @@ All notable changes to the "ocursor" extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [Unreleased]
+
+### Added
+
+- Custom context budget input in the model options picker, accepting token counts or k/m suffixes up to the model's largest preset.
+
 ## [0.2.0] - 2026-09-24
 
 ### Added
